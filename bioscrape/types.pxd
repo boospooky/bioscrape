@@ -39,7 +39,7 @@ cdef class Propensity:
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
-
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
 
 cdef class ConstitutivePropensity(Propensity):
     """
@@ -76,6 +76,7 @@ cdef class UnimolecularPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
 
 
 cdef class BimolecularPropensity(Propensity):
@@ -98,6 +99,7 @@ cdef class BimolecularPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
 
 cdef class PositiveHillPropensity(Propensity):
     """
@@ -119,6 +121,7 @@ cdef class PositiveHillPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
 
 cdef class PositiveProportionalHillPropensity(Propensity):
     """
@@ -145,6 +148,7 @@ cdef class PositiveProportionalHillPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
 
 cdef class NegativeHillPropensity(Propensity):
     """
@@ -167,6 +171,8 @@ cdef class NegativeHillPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
+
 
 cdef class NegativeProportionalHillPropensity(Propensity):
     """
@@ -192,6 +198,7 @@ cdef class NegativeProportionalHillPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
 
 cdef class MassActionPropensity(Propensity):
     # variables
@@ -204,6 +211,7 @@ cdef class MassActionPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time)
     cdef double get_stochastic_propensity(self, double* state, double* params, double time)
     cdef double get_stochastic_volume_propensity(self, double *state, double *params, double volume, double time)
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time)
 
 cdef class Term:
     cdef double evaluate(self, double *species, double *params, double time)
@@ -580,6 +588,7 @@ cdef class Model:
     cdef unsigned _next_params_index
     cdef unsigned _dummy_param_counter
     cdef unsigned has_delay
+    cdef unsigned has_general_propensities
 
     cdef vector[void*] c_propensities
     cdef list propensities

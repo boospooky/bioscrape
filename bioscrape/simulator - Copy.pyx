@@ -276,8 +276,8 @@ cdef class CSimInterface:
         pass
     cdef void compute_volume_propensities(self, double *state, double *propensity_destination, double volume, double time):
         pass
-    cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time):
-        pass
+    #cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time):
+    #    pass
 
     # by default stochastic propensities are assumed to be the same as normal propensities. This may be overwritten by the subclass, however.
     cdef void compute_stochastic_propensities(self, double *state, double *propensity_destination, double time):
@@ -286,6 +286,7 @@ cdef class CSimInterface:
     # by default stochastic propensities are assumed to be the same as normal propensities. This may be overwritten by the subclass, however.
     cdef void compute_stochastic_volume_propensities(self, double *state, double *propensity_destination, double volume, double time):
         self.compute_volume_propensities(state, propensity_destination, volume, time)
+
 
     cdef unsigned requires_delay(self):
         return self.delay_flag
@@ -462,7 +463,7 @@ cdef class ModelCSimInterface(CSimInterface):
         for rxn in range(self.num_reactions):
             propensity_destination[rxn] = (<Propensity> (self.c_propensities[0][rxn]) ).get_stochastic_volume_propensity(state, self.c_param_values, volume, time)
 
-    cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time):
+    """cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time):
         cdef unsigned rxn, i, j
         cdef double dpdij #derivative of the propensity, not taking into account the stochiometric matrix
 
@@ -477,10 +478,9 @@ cdef class ModelCSimInterface(CSimInterface):
             for rxn in range(self.num_reactions):
                 if self.update_array[i, rxn]>0:
                     for j in range(self.num_species):
-                        dpdij = (<Propensity>(self.c_propensities[0][rxn])).get_species_derivative(j, state, self.c_param_values, time)
-                        jacobian_destination[i, j]+=self.update_array[i, rxn]*dpdij
-
-
+                        dpdij = <Propensity>(self.c_propensities[0][rxn]).get_species_derivative(j, state, self.c_param_values, time)
+                        jacobian_destination[i, j]+=update_array[i, rxn]*dpdij
+    """
     cdef unsigned get_number_of_rules(self):
         return self.c_repeat_rules[0].size()
 
@@ -505,9 +505,6 @@ cdef class ModelCSimInterface(CSimInterface):
 
     def py_get_param_values(self):
         return self.np_param_values
-
-    def py_has_general_propensities(self):
-        return self.model.get_has_general_propensities()
 
     cdef unsigned get_num_parameters(self):
         return self.np_param_values.shape[0]
@@ -571,7 +568,6 @@ cdef class SafeModelCSimInterface(ModelCSimInterface):
             if self.prop_is_0 == 0:
                 propensity_destination[self.rxn_ind] = (<Propensity> (self.c_propensities[0][self.rxn_ind]) ).get_stochastic_volume_propensity(state, self.c_param_values, volume, time)
 
-    
     cdef void check_count_function(self, double *state, double volume):
         self.s_ind = 0
 
@@ -1265,8 +1261,7 @@ cdef class RegularSimulator:
 
 cdef void* global_simulator
 cdef np.ndarray global_derivative_buffer
-cdef global_jacobian_array
-                
+
 def rhs_global(np.ndarray[np.double_t,ndim=1] state, double t):
     global global_simulator
     global global_derivative_buffer
@@ -1278,12 +1273,6 @@ def rhs_global(np.ndarray[np.double_t,ndim=1] state, double t):
 def rhs_ode(double t, np.ndarray[np.double_t, ndim=1] state):
     return rhs_global(state,t)
 
-def jacobian_global(np.ndarray[np.double_t,ndim=1] state, double t):
-    global global_simulator
-    global global_jacobian_array
-    (<CSimInterface>global_simulator).compute_jacobian(<double *> state.data, global_jacobian_array, t)
-    return global_jacobian_array
-
 cdef class DeterministicSimulator(RegularSimulator):
     """
     A class for implementing a deterministic simulator.
@@ -1293,15 +1282,12 @@ cdef class DeterministicSimulator(RegularSimulator):
         self.atol = 1E-8
         self.rtol = 1E-8
         self.mxstep = 500000
-        self.use_jacobian = 1
+        self.use_jacobian = 0
 
-    def py_set_use_jacobian(self, int use_jacobian):
-        if use_jacobian == 0 or use_jacobian == False:
-            self.use_jacobian = 0
-        elif use_jacobian == 1 or use_jacobian == True:
-            self.use_jacobian = 1
-        else:
-            raise ValueError("use_jacobian must be True or False")
+    def py_set_use_jacobian(self, use_jacobian):
+        if use_jacobian not in [True, False]:
+            raise ValueError("parameter use_jacobian must be True or False.")
+        self.use_jacobian = int(use_jacobian)
 
     def py_set_tolerance(self, double atol, double rtol):
         self.set_tolerance(atol, rtol)
@@ -1330,20 +1316,19 @@ cdef class DeterministicSimulator(RegularSimulator):
         cdef unsigned index = 0
         cdef unsigned steps_allowed = 500
         cdef np.ndarray[np.double_t, ndim=2] results
-        global global_jacobian_array
-
-        if self.use_jacobian and sim.py_has_general_propensities():
-            print("Warning: Jacobian's not defined for general propensities and integration may be slower.")
-            self.py_set_use_jacobian(False)
+        cdef np.ndarray[np.double_t, ndim = 2] jacobian_array
 
         while True:
             if self.use_jacobian:
-                global_jacobian_array = np.zeros((num_species, num_species))
-                results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol,
-                                         mxstep=steps_allowed, full_output=True, Dfun = jacobian_global)
+                jacobian_array = np.zeros((self.num_species, self.num_species))
+
+                #def Jacobian(x, t):
+                #    sim.compute_jacobian(x, jacabonian_array, t)
+                #    return jacobian_array
+
+                #results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol, mxstep=steps_allowed, full_output=True, Dfun = Jacobian)
             else:
-                results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol,
-                                         mxstep=steps_allowed, full_output=True)
+                results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol, mxstep=steps_allowed, full_output=True)
 
             if full_output['message'] == 'Integration successful.':
                 if sim.get_number_of_rules() > 0:
@@ -2062,7 +2047,7 @@ cdef class DelayVolumeSSASimulator(DelayVolumeSimulator):
 
 
 #A wrapper function to allow easy simulation of Models
-def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = False, delay = None, safe = False, volume = False, return_dataframe = True, use_jacobian = True):
+def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = False, delay = None, safe = False, volume = False, return_dataframe = True):
     #Check model and interface
     if Model == None and Interface == None:
         raise ValueError("py_simulate_model requires either a Model or CSimInterface to be passed in.")
@@ -2122,12 +2107,6 @@ def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = F
         if v != None:
             warnings.warn("uncessary volume parameter for deterministic simulation.")
         Sim = DeterministicSimulator()
-
-        if use_jacobian and Interface.py_has_general_propensities():
-            warnings.warn("Jacobian's are not defined for general propensities and will not be used")
-            Sim.py_set_use_jacobian(False)
-        else:
-            Sim.py_set_use_jacobian(use_jacobian)
         Interface.py_prep_deterministic_simulation()
         result = Sim.py_simulate(Interface, timepoints)
 

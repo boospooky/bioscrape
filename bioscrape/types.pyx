@@ -77,6 +77,14 @@ cdef class Propensity:
 
 
 
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        """
+        get_species_derivative returns the derivative of the propensity with respect to the species with index species_ind.
+        This is used when calculating the Jacobian for deterministic ODE integration.
+        Derivative defaults to 0 so this should be subclassed.
+        """
+        return 0
+
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
         """
         Initializes the parameters and species to look at the right indices in the state
@@ -133,6 +141,11 @@ cdef class UnimolecularPropensity(Propensity):
     cdef double get_volume_propensity(self, double *state, double *params, double volume, double time):
         return params[self.rate_index] * state[self.species_index]
 
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        if species_ind == self.species_index:
+            return params[self.rate_index]
+        else:
+            return 0
 
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
 
@@ -174,7 +187,13 @@ cdef class BimolecularPropensity(Propensity):
         else:
             return params[self.rate_index]*state[self.s1_index]*max(state[self.s1_index]-1, 0) / volume
 
-    
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        if species_ind == self.s1_index:
+            return params[self.rate_index]*state[self.s2_index]
+        elif species_ind == self.s2_index:
+            return params[self.rate_index]*state[self.s1_index]
+        else:
+            return 0
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
 
         for key,value in param_dictionary.items():
@@ -212,6 +231,12 @@ cdef class PositiveHillPropensity(Propensity):
         cdef double n = params[self.n_index]
         cdef double rate = params[self.rate_index]
         return rate * (X / K) ** n / (1 + (X/K)**n)
+
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        if species_ind == self.s1_index:
+            return params[self.rate_index]*params[self.n_index]*(state[self.s1_index]/params[self.K_index])**params[self.n_index] / (state[self.s1_index]*(1+(state[self.s1_index]/params[self.K_index])**params[self.n_index])**2)
+        else:
+            return 0
 
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
 
@@ -253,6 +278,13 @@ cdef class PositiveProportionalHillPropensity(Propensity):
         cdef double rate = params[self.rate_index]
         return d * rate * (X / K) ** n / (1 + (X/K)**n)
 
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        if species_ind == self.s1_index:
+            return state[self.d_index]*params[self.rate_index]*params[self.n_index]*(state[self.s1_index]/params[self.K_index])**params[self.n_index] / (state[self.s1_index]*(1+(state[self.s1_index]/params[self.K_index])**params[self.n_index])**2)
+        elif species_ind == self.d_index:
+            return params[self.rate_index]*(state[self.s1_index]/params[self.K_index])**params[self.n_index]/(1+(state[self.s1_index]/params[self.K_index])**params[self.n_index])
+        else:
+            return 0
 
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
 
@@ -296,6 +328,12 @@ cdef class NegativeHillPropensity(Propensity):
         cdef double rate = params[self.rate_index]
         return rate * 1 / (1 + (X/K)**n)
 
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        if species_ind == self.s1_index:
+            return -params[self.rate_index]*params[self.n_index]*(state[self.s1_index]/params[self.K_index])**params[self.n_index] / (state[self.s1_index]*(1+(state[self.s1_index]/params[self.K_index])**params[self.n_index])**2)
+        else:
+            return 0
+
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
 
         for key,value in param_dictionary.items():
@@ -337,6 +375,13 @@ cdef class NegativeProportionalHillPropensity(Propensity):
         cdef double rate = params[self.rate_index]
         return d * rate * 1 / (1 + (X/K)**n)
 
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        if species_ind == self.s1_index:
+            return -state[self.d_index]*params[self.rate_index]*params[self.n_index]*(state[self.s1_index]/params[self.K_index])**params[self.n_index] / (state[self.s1_index]*(1+(state[self.s1_index]/params[self.K_index])**params[self.n_index])**2)
+        elif species_ind == self.d_index:
+            return -params[self.rate_index]*(state[self.s1_index]/params[self.K_index])**params[self.n_index]/(1+(state[self.s1_index]/params[self.K_index])**params[self.n_index])
+        else:
+            return 0
 
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
 
@@ -425,6 +470,15 @@ cdef class MassActionPropensity(Propensity):
             return ans / volume
         else:
             return ans / (volume ** (self.num_species - 1))
+
+    cdef double get_species_derivative(self, int species_ind, double *state, double *params, double time):
+        cdef int i
+        cdef double ans = 0
+        for i in range(self.num_species):
+            if species_ind == self.sp_ind[i]:
+                ans = self.get_propensity(state, params, time)/state[self.sp_ind[i]]
+                break
+        return ans
 
 
     def initialize(self, dict param_dictionary, dict species_indices, dict parameter_indices):
@@ -1339,7 +1393,7 @@ cdef class Model:
         self._dummy_param_counter = 0
 
         self.has_delay = False #Does the Model contain any delay reactions? Updated in _add_reaction.
-
+        self.has_general_propensities = False #Does the Model contain any propensities which use a formula (GeneralPropensities)? If True cannot use Jacobian Integration
         self.species2index = {}
         self.params2index = {}
         self.propensities = []
@@ -1564,6 +1618,7 @@ cdef class Model:
                     self._param_dict_check(propensity_param_dict, "k", "DummyVar_MassActionPropensity")
 
         elif propensity_type == 'general':
+            self.has_general_propensities = True
             prop_object = GeneralPropensity()
         else:
             raise SyntaxError('Propensity Type is not supported: ' + propensity_type)
@@ -2161,6 +2216,9 @@ cdef class Model:
             return self.species_values[self.species2index[species_name]]
         else:
             raise LookupError('No species with name '+ species_name)
+
+    def get_has_general_propensities(self):
+        return self.has_general_propensities
 
     def parse_general_expression(self, instring):
         return parse_expression(instring,self.species2index,self.params2index)

@@ -68,7 +68,8 @@ for ind in range(len(propensity_types)):
 	rxn = (inputs, outputs, prop_type, param_dict)
 	M = Model(reactions = [rxn])
 	M.set_species(x0)
-	results_d = py_simulate_model(timepoints, Model = M)
+	print("M.has_general_propensities", M.get_has_general_propensities())
+	results_d = py_simulate_model(timepoints, Model = M, use_jacobian = True)
 	results_s = py_simulate_model(timepoints, Model = M, stochastic = True)
 
 	plt.plot(timepoints, results_d["C"], label = "deterministic "+str(prop_type)+"params = "+str(param_dict), color = color_list[ind])

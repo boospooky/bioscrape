@@ -475,8 +475,8 @@ cdef class MassActionPropensity(Propensity):
         cdef int i
         cdef double ans = 0
         for i in range(self.num_species):
-            if species_ind == self.sp_ind[i]:
-                ans = self.get_propensity(state, params, time)/state[self.sp_ind[i]]
+            if species_ind == self.sp_inds[i]:
+                ans = self.get_propensity(state, params, time)/state[self.sp_inds[i]]
                 break
         return ans
 

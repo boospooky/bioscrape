@@ -11,6 +11,10 @@ import warnings
 param_min = -1
 param_max = 1
 include_delays = False
+stochastic = False
+safe = False
+use_jacobian = False
+timepoints = np.arange(0, 1, .001)
 
 #Names of different supported propensities
 propensity_types = ['massaction']#, 'hillpositive', 'proportionalhillpositive', 'hillnegative', 'proportionalhillnegative', 'massaction']#, 'general']
@@ -118,8 +122,8 @@ for test in range(tests):
 			rxn = (inputs, outputs, prop_type, param_dict, delay_type, delay_inputs, delay_outputs, delay_params)
 		reactions.append(rxn)
 
-	timepoints = np.arange(0, 0.001, .0001)
+	
 	print("Simulating model", test, "#rxns=", len(reactions), "rxns=", reactions)
 	M = Model(reactions = reactions, initial_condition_dict = {s:np.random.randint(10, 100) for s in species})
-	results_s = py_simulate_model(timepoints, Model = M, stochastic = True, delay = include_delays, safe = True)		
+	results_s = py_simulate_model(timepoints, Model = M, stochastic = stochastic, delay = include_delays, safe = safe, use_jacobian = use_jacobian)		
 	print("simulation successful")

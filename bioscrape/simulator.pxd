@@ -94,7 +94,7 @@ cdef class CSimInterface:
     cdef void compute_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
     cdef void compute_stochastic_propensities(self, double *state, double *propensity_destination, double time)
     cdef void compute_stochastic_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
-    cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time)
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time)
     cdef unsigned requires_delay(self)
 
     cdef void apply_repeated_rules(self, double *state, double time)
@@ -130,7 +130,7 @@ cdef class ModelCSimInterface(CSimInterface):
     cdef void compute_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
     cdef void compute_stochastic_propensities(self, double *state, double *propensity_destination, double time)
     cdef void compute_stochastic_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
-    cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time)
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time)
     
     cdef np.ndarray get_initial_state(self)
 

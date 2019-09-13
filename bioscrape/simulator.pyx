@@ -12,6 +12,7 @@ from types cimport Model, Delay, Propensity, Rule
 from scipy.integrate import odeint, ode
 import sys
 import warnings
+import time as pytime
 
 
 ##################################################                ####################################################
@@ -276,7 +277,7 @@ cdef class CSimInterface:
         pass
     cdef void compute_volume_propensities(self, double *state, double *propensity_destination, double volume, double time):
         pass
-    cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time):
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time):
         pass
 
     # by default stochastic propensities are assumed to be the same as normal propensities. This may be overwritten by the subclass, however.
@@ -462,23 +463,35 @@ cdef class ModelCSimInterface(CSimInterface):
         for rxn in range(self.num_reactions):
             propensity_destination[rxn] = (<Propensity> (self.c_propensities[0][rxn]) ).get_stochastic_volume_propensity(state, self.c_param_values, volume, time)
 
-    cdef void compute_jacobian(self, double *state, np.ndarray jacobian_destination, double time):
-        cdef unsigned rxn, i, j
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time):
+        cdef unsigned rxn, i, j, ind
         cdef double dpdij #derivative of the propensity, not taking into account the stochiometric matrix
 
         #Cycle through species and reactions to update the Jacobian using the stochiometric matrix
+        t0 = pytime.clock()
         for i in range(self.num_species):
 
             #Reset Jacobian
             for j in range(self.num_species):
-                jacobian_destination[i, j] = 0
-
+                ind = ind = i*self.num_species + j
+                jacobian_destination[ind] = 0
+        #t1 = pytime.clock()
+        #print("Reset Jacobian to 0 took:", t1-t0)
+        #t0 = pytime.clock()
+        for i in range(self.num_species):
             #Add each reactions contribution to each Jacobian entry [i, j]
             for rxn in range(self.num_reactions):
                 if self.update_array[i, rxn]>0:
                     for j in range(self.num_species):
+                        ind = i*self.num_species + j
                         dpdij = (<Propensity>(self.c_propensities[0][rxn])).get_species_derivative(j, state, self.c_param_values, time)
-                        jacobian_destination[i, j]+=self.update_array[i, rxn]*dpdij
+                        jacobian_destination[ind]+=self.update_array[i, rxn]*dpdij
+        #t1 = pytime.clock()
+        #print("Calculate Jacobian took:", t1- t0)
+
+
+    def py_compute_jacobian(self, np.ndarray state, np.ndarray jacobian_destination, double time):
+        return self.compute_jacobian(<double*> state.data, <double *> jacobian_destination.data, time)
 
 
     cdef unsigned get_number_of_rules(self):
@@ -1265,14 +1278,16 @@ cdef class RegularSimulator:
 
 cdef void* global_simulator
 cdef np.ndarray global_derivative_buffer
-cdef global_jacobian_array
+cdef np.ndarray global_jacobian_array
                 
 def rhs_global(np.ndarray[np.double_t,ndim=1] state, double t):
     global global_simulator
     global global_derivative_buffer
+
     (<CSimInterface>global_simulator).apply_repeated_rules(<double*> state.data,t)
     (<CSimInterface>global_simulator).calculate_determinstic_derivative( <double*> state.data,
                                                                          <double*> global_derivative_buffer.data, t)
+
     return global_derivative_buffer
 
 def rhs_ode(double t, np.ndarray[np.double_t, ndim=1] state):
@@ -1281,7 +1296,10 @@ def rhs_ode(double t, np.ndarray[np.double_t, ndim=1] state):
 def jacobian_global(np.ndarray[np.double_t,ndim=1] state, double t):
     global global_simulator
     global global_jacobian_array
-    (<CSimInterface>global_simulator).compute_jacobian(<double *> state.data, global_jacobian_array, t)
+    #t0 = pytime.clock()
+    (<CSimInterface>global_simulator).compute_jacobian(<double *> state.data, <double*> global_jacobian_array.data, t)
+    #t1 = pytime.clock()
+    #print("Time inside global Jacobian", t1-t0)
     return global_jacobian_array
 
 cdef class DeterministicSimulator(RegularSimulator):

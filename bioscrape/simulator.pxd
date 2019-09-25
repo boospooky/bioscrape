@@ -82,6 +82,11 @@ cdef class CSimInterface:
 
     cdef void prep_deterministic_simulation(self)
     cdef void calculate_determinstic_derivative(self, double *x, double *dxdt, double t)
+
+    #Optional method must be overwritten in subclasses. Only used if simulator tries to access a jacobian.
+    cdef void prep_deterministic_jacobian(self)
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double* global_jacobian_inds, double time)
+
     # end of deterministic simulation stuff
 
     #method meant to be overwritten to check if interfaces/models are correct. called by simulators.
@@ -94,7 +99,6 @@ cdef class CSimInterface:
     cdef void compute_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
     cdef void compute_stochastic_propensities(self, double *state, double *propensity_destination, double time)
     cdef void compute_stochastic_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
-    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time)
     cdef unsigned requires_delay(self)
 
     cdef void apply_repeated_rules(self, double *state, double time)
@@ -125,13 +129,19 @@ cdef class ModelCSimInterface(CSimInterface):
     cdef double *c_param_values
     cdef np.ndarray np_param_values
 
+    #Used for fast jacobian computation
+    cdef vector[vector[int]] J_rxn_indices #J_rxn_indices[i] = list of propensities which effect species i
+    cdef vector[vector[int]] rxn_species_indices #rxn_species_indices[r] = list of species which effect propensity r
+
     cdef double compute_delay(self, double *state, unsigned rxn_index)
     cdef void compute_propensities(self, double *state, double *propensity_destination, double time)
     cdef void compute_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
     cdef void compute_stochastic_propensities(self, double *state, double *propensity_destination, double time)
     cdef void compute_stochastic_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
-    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time)
-    
+    cdef void prep_deterministic_jacobian(self)
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double* global_jacobian_inds, double time)
+
+
     cdef np.ndarray get_initial_state(self)
 
     cdef void apply_repeated_rules(self, double *state,double time)

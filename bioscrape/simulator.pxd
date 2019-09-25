@@ -370,7 +370,7 @@ cdef class DeterministicSimulator(RegularSimulator):
     cdef double rtol
     cdef unsigned mxstep
     cdef unsigned use_jacobian
-
+    cdef int method
 
     cdef SSAResult simulate(self, CSimInterface sim, np.ndarray timepoints)
 

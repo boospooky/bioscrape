@@ -9,7 +9,7 @@ cimport random as cyrandom
 from vector cimport vector
 from libc.math cimport fabs
 from types cimport Model, Delay, Propensity, Rule
-from scipy.integrate import odeint, ode
+from scipy.integrate import odeint, ode, solve_ivp
 import sys
 import warnings
 import time as pytime
@@ -486,7 +486,7 @@ cdef class ModelCSimInterface(CSimInterface):
         cdef unsigned i, j, rxn, ind_r, s_ind
         cdef Propensity prop
         species2index = self.model.get_species2index()
-
+        propensity_species = self.model.get_propensity_species_list()
         self.rxn_species_indices.clear()
         
         #Cycle through reactions
@@ -495,40 +495,47 @@ cdef class ModelCSimInterface(CSimInterface):
 
             #Add species that effect the propensity
             prop = <Propensity>self.c_propensities[0][rxn]
-            species, params = prop.get_species_and_parameters()
+            species = propensity_species[rxn]
             for s in species:
                 s_ind = <unsigned>species2index[s]
                 self.rxn_species_indices[rxn].push_back(s_ind)
 
-
     cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time):
         cdef unsigned rxn, s1, s2, s1_ind, s2_ind, rxn_ind
         cdef double d1, d2, d3 #derivative of the propensity, not taking into account the stochiometric matrix
+        cdef Propensity prop
 
         #Cycle through species and reactions to update the Jacobian using the stochiometric matrix to 0
-        #(May not be necessary)
+        #Only resettng the values that changed
         t0 = pytime.clock()
-        for i in range(self.num_species):
-            iterate = 1
-            for j in range(self.num_species):
-                ind = i*self.num_species + j
-                jacobian_destination[ind] = 0
+        for s1 in range(self.num_species):
+             for rxn_ind in range(self.S_indices[s1].size()):
+                rxn = self.S_indices[s1][rxn_ind]
+                for s2_ind in range(self.rxn_species_indices[rxn].size()):
+                    s2 = self.rxn_species_indices[rxn][s2_ind]
+                    ind = s1*self.num_species + s2
+                    jacobian_destination[ind] = 0
 
         t1 = pytime.clock()
         print("Reset Jacobian to 0 took (DO I NEED THIS?):", t1-t0)
         t0 = pytime.clock()
         
         for s1 in range(self.num_species):
+            #print("s1", s1, "self.S_indices", self.S_indices)
             #Add each reactions contribution to each Jacobian entry [i, j]
 
+            
             for rxn_ind in range(self.S_indices[s1].size()):
+                #print("rxn_ind", rxn_ind)
                 rxn = self.S_indices[s1][rxn_ind]
+                prop = <Propensity>(self.c_propensities[0][rxn])
 
                 for s2_ind in range(self.rxn_species_indices[rxn].size()):
+                    #print("s2_ind", s2_ind)
                     s2 = self.rxn_species_indices[rxn][s2_ind]
                     ind = s1*self.num_species + s2
-                    jacobian_destination[ind] +=  self.update_array[s1, rxn](<Propensity>(self.c_propensities[0][rxn])).get_species_derivative(s2, d1, d2, d3)#state, self.c_param_values, time)
-        
+                    jacobian_destination[ind] +=  self.update_array[s1, rxn]*prop.get_species_derivative(s2, state, self.c_param_values, time)
+        #print("out")
         """ global_jacobian_inds NOT USED BELOW 
                     for j in range(self.num_species):
                         ind = i*self.num_species + j
@@ -645,8 +652,11 @@ cdef class SafeModelCSimInterface(ModelCSimInterface):
 
 cdef class SSAResult:
     def __init__(self, np.ndarray timepoints, np.ndarray result):
+        t0 = pytime.clock()
         self.timepoints = timepoints
         self.simulation_result = result
+        t1 = pytime.clock()
+        print("SSAResult Instantiation", t1-t0)
 
     def py_get_timepoints(self):
         return self.get_timepoints()
@@ -1330,11 +1340,11 @@ cdef np.ndarray global_jacobian_array
 def rhs_global(np.ndarray[np.double_t,ndim=1] state, double t):
     global global_simulator
     global global_derivative_buffer
-    t0 = pytime.clock()
+    #t0 = pytime.clock()
     (<CSimInterface>global_simulator).apply_repeated_rules(<double*> state.data,t)
     (<CSimInterface>global_simulator).calculate_determinstic_derivative( <double*> state.data, <double*> global_derivative_buffer.data, t)
-    t1 = pytime.clock()
-    print("Time inside global RHS", t1-t0)
+    #t1 = pytime.clock()
+    #print("Time inside global RHS", t1-t0)
 
     return global_derivative_buffer
 
@@ -1350,6 +1360,9 @@ def jacobian_global(np.ndarray[np.double_t,ndim=1] state, double t):
     print("Time inside global Jacobian", t1-t0)
     return global_jacobian_array
 
+def jacobian_ode(double t, np.ndarray[np.double_t,ndim=1] state):
+    return jacobian_global(state, t)
+
 cdef class DeterministicSimulator(RegularSimulator):
     """
     A class for implementing a deterministic simulator.
@@ -1359,15 +1372,55 @@ cdef class DeterministicSimulator(RegularSimulator):
         self.atol = 1E-8
         self.rtol = 1E-8
         self.mxstep = 500000
-        self.use_jacobian = 1
+        self.use_jacobian = 0
+        self.method = -1
 
     def py_set_use_jacobian(self, int use_jacobian):
         if use_jacobian == 0 or use_jacobian == False:
             self.use_jacobian = 0
         elif use_jacobian == 1 or use_jacobian == True:
             self.use_jacobian = 1
+
+            if self.py_get_integration_method() not in  ["BDF", "Radau", "LSODA", "ODEint"]:
+                if self.method != -1:
+                    print("Integration method changed from "+self.py_get_integration_method()+" to BDF in order to make use of the Jacobian. Only Supported methods with jacobians are BDF, Radau, LSODA, and ODEint.")
+                self.py_set_integration_method("BDF")
         else:
             raise ValueError("use_jacobian must be True or False")
+
+    def py_set_integration_method(self, method):
+        if method in [None, "Default", "default"]:
+            self.method = -1
+        elif method in [0, "RK45"]:
+            self.method = 0
+        elif method in [1, "RK23"]:
+            self.method = 1
+        elif method in [2, "Radau"]:
+            self.method = 2
+        elif method in [3, "BDF"]:
+            self.method = 3
+        elif method in [4, "LSODA"]:
+            self.method = 4
+        elif method in [5, "ODEint"]:
+            self.method = 5
+        else:
+            raise ValueError("method must be one of the following: None, 'RK45', 'RK23', 'Radau', 'BDF', 'LSODA' or 'ODEint'. See Scipy.solve_ivp for more details on the first methods. Passing 'ODEint' will automatically use scipy.odeint instead.")
+
+    def py_get_integration_method(self):
+        if self.method == 0:
+            return "RK45"
+        elif self.method == 1:
+            return "RK23"
+        elif self.method == 2:
+            return "Radau"
+        elif self.method == 3:
+            return "BDF"
+        elif self.method == 4:
+            return "LSODA"
+        elif self.method == 5:
+            return "ODEint"
+        else:
+            return "ODEint"
 
     def py_set_tolerance(self, double atol, double rtol):
         self.set_tolerance(atol, rtol)
@@ -1402,27 +1455,65 @@ cdef class DeterministicSimulator(RegularSimulator):
         cdef np.ndarray[np.double_t, ndim=2] results
         global global_jacobian_array
 
+
         if self.use_jacobian and sim.py_has_general_propensities():
             print("Warning: Jacobian's not defined for general propensities and integration may be slower.")
             self.py_set_use_jacobian(False)
         elif self.use_jacobian:
-            sim.prep_deterministic_jacobian()
+            global_jacobian_array = np.zeros((num_species, num_species))
 
+        method = self.py_get_integration_method()
+        tspan = (timepoints[0], timepoints[len(timepoints)-1])
         while True:
             if self.use_jacobian:
-                results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol,
-                                         mxstep=steps_allowed, full_output=True, Dfun = jacobian_global)
+                print("using Jacobian", "method=", method)
+                #results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol,
+                #                         mxstep=steps_allowed, full_output=True, Dfun = jacobian_global, tfirst  = True)
+                
+                t0 = pytime.clock()
+                if method == "ODEint":
+                    results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol, 
+                                            mxstep=steps_allowed, full_output=True, Dfun = jacobian_global)
+                    message = full_output['message']
+                    if "success" in message:
+                        success = True
+                else:
+                    full_output = solve_ivp(rhs_ode, tspan, x0, t_eval = timepoints, atol = self.atol, rtol = self.rtol,
+                                    jac = jacobian_ode, method = method)
+                    results = np.transpose(full_output['y'])
+                    message = full_output['message']
+                    success = full_output['success']
+                t1 = pytime.clock()
+                
+                
+                print("numerical integration time", t1-t0)
             else:
-                results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol,
-                                         mxstep=steps_allowed, full_output=True)
+                #
+                print("No Jacobian", "method=", method)
+                t0 = pytime.clock()
+                if method == "ODEint":
+                    results, full_output = odeint(rhs_global, x0, timepoints,atol=self.atol, rtol=self.rtol,
+                                            mxstep=steps_allowed, full_output=True)
+                    message = full_output['message']
+                    if "success" in message:
+                        success = True
+                else:
+                    full_output = solve_ivp(rhs_ode, tspan, x0, t_eval = timepoints, atol = self.atol, rtol = self.rtol, method = method)
+                    results = np.transpose(full_output['y'])
+                    message = full_output['message']
+                    success = full_output['success']
+                t1 = pytime.clock()
+                print("numerical integration time", t1-t0)
+                
 
-            if full_output['message'] == 'Integration successful.':
+            if success:
                 if sim.get_number_of_rules() > 0:
                     for index in range(timepoints.shape[0]):
-                        sim.apply_repeated_rules( &(results[index,0]),timepoints[index] )
+                        sim.apply_repeated_rules( &(results[index,0]),timepoints[index])
+                print("timepoints.shape", len(timepoints), "len(results)", len(results))
                 return SSAResult(timepoints,results)
 
-            sys.stderr.write('odeint failed with mxstep=%d...' % (steps_allowed))
+            sys.stderr.write('integration failed with mxstep=%d...' % (steps_allowed))
 
             # make the mxstep bigger if the user specified a bigger max
             if steps_allowed >= self.mxstep:
@@ -1432,9 +1523,9 @@ cdef class DeterministicSimulator(RegularSimulator):
                 if steps_allowed > self.mxstep:
                     steps_allowed = self.mxstep
 
-        sys.stderr.write('odeint failed entirely\n')
+        sys.stderr.write('integration failed entirely\nMessage:'+message)
 
-        return SSAResult(timepoints,results * np.nan)
+        return SSAResult(timepoints, results * np.nan)
 
 
     cdef SSAResult simulate(self, CSimInterface sim, np.ndarray timepoints):
@@ -2133,8 +2224,10 @@ cdef class DelayVolumeSSASimulator(DelayVolumeSimulator):
 
 
 #A wrapper function to allow easy simulation of Models
-def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = False, delay = None, safe = False, volume = False, return_dataframe = True, use_jacobian = True):
+def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = False, delay = None, safe = False, volume = False, return_dataframe = True, use_jacobian = False, integration_method = None):
     #Check model and interface
+
+    t0 = pytime.clock()
     if Model == None and Interface == None:
         raise ValueError("py_simulate_model requires either a Model or CSimInterface to be passed in.")
     elif Model!=None and Interface!=None:
@@ -2149,6 +2242,9 @@ def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = F
             Interface = ModelCSimInterface(Model)
     elif Interface != None and safe:
         warnings.warn("Cannot gaurantee that the interface passed in is safe. Simulating anyway.")
+    t1 = pytime.clock()
+    print("Interface and Model set-up", t1-t0)
+
 
     #Create Volume (if necessary)
     if isinstance(volume, Volume):
@@ -2169,7 +2265,8 @@ def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = F
                 v = Volume()
                 v.py_set_volume(1.0)
             
-    #Create Simulator and Simulate    
+    #Create Simulator and Simulate
+
     if delay:
         if not stochastic:
             warnings.warn("Delay Simulators only exist for stochastic simulations. Defaulting to Stochastic simulation")
@@ -2182,6 +2279,10 @@ def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = F
             Sim = DelayVolumeSimulator()
             result = Sim.py_delay_volume_simulate(Interface, q, v, timepoints)
     elif stochastic:
+        if use_jacobian == True:
+            warnings.warn("use_jacobian option only works for deterministic simulations.")
+        if integration_method != None:
+            warnings.warn("integration_method keyword is only used to change the integration method for deterministic simulations.")
         if v == None:
             Sim = SSASimulator()
             result = Sim.py_simulate(Interface, timepoints)
@@ -2192,15 +2293,26 @@ def py_simulate_model(timepoints, Model = None, Interface = None, stochastic = F
     else:
         if v != None:
             warnings.warn("uncessary volume parameter for deterministic simulation.")
+
+        t0 = pytime.clock()
         Sim = DeterministicSimulator()
 
+        Interface.py_prep_deterministic_simulation()
+        Sim.py_set_integration_method(integration_method)
         if use_jacobian and Interface.py_has_general_propensities():
             warnings.warn("Jacobian's are not defined for general propensities and will not be used")
             Sim.py_set_use_jacobian(False)
         else:
+            if use_jacobian:
+                Interface.py_prep_deterministic_jacobian()
             Sim.py_set_use_jacobian(use_jacobian)
-        Interface.py_prep_deterministic_simulation()
+
+        t1 = pytime.clock()
+        print("Instantiating and prepping simulator and interface", t1-t0)
+        t0 = pytime.clock()
         result = Sim.py_simulate(Interface, timepoints)
+        t1 = pytime.clock()
+        print("Total py_simulate time", t1-t0)
 
     if return_dataframe:
         return result.py_get_dataframe(Model = Model)

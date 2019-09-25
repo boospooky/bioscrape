@@ -592,6 +592,8 @@ cdef class Model:
 
     cdef vector[void*] c_propensities
     cdef list propensities
+    cdef list propensity_species
+    cdef list propensity_params
 
     cdef list delays
     cdef vector[void*] c_delays

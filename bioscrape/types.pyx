@@ -1402,7 +1402,8 @@ cdef class Model:
         self.params_values = np.array([])
         self.species_values = np.array([])
         self.txt_dict = {'reactions':"", 'rules':""} # A dictionary to store XML txt to write bioscrape xml
-
+        self.propensity_species = [] #Stores a list of species involved in each propensity
+        self.propensity_params = [] #stores a list of params involved in each propensity
         #These must be updated later
         self.update_array = None
         self.delay_update_array = None
@@ -1529,6 +1530,9 @@ cdef class Model:
             self._add_species(species_name)
         for param_name in param_names:
             self._add_param(param_name)
+
+        self.propensity_species.append(species_names)
+        self.propensity_params.append(param_names)
 
         self.reaction_updates.append(reaction_update_dict)
         propensity_object.initialize(propensity_param_dict, self.species2index, self.params2index)
@@ -2091,6 +2095,11 @@ cdef class Model:
     def get_number_of_species(self):
         return len(self.species2index.keys())
 
+    def get_propensity_species_list(self):
+        return self.propensity_species
+
+    def get_propensity_params_list(self):
+        return self.propensity_params
 
     def set_params(self, param_dict):
         """

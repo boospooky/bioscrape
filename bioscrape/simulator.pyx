@@ -419,11 +419,11 @@ cdef class CSimInterface:
         self.calculate_determinstic_derivative(<double*> x.data, <double*> dx.data, t)
 
     #Optional method that must be overwritten in subclasses. Only used for deterministic simulations with jacobian = True.
-    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double* global_jacobian_inds, double time):
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time):
         raise NotImplementedError("compute_jacobian is model dependent and must be implement in each CSimInterface subclass.")
 
-    def py_compute_jacobian(self, np.ndarray state, np.ndarray jacobian_destination, np.ndarray global_jacobian_inds, double time):
-        return self.compute_jacobian(<double*> state.data, <double *> jacobian_destination.data, <double*> global_jacobian_inds.data, time)
+    def py_compute_jacobian(self, np.ndarray state, np.ndarray jacobian_destination, double time):
+        return self.compute_jacobian(<double*> state.data, <double *> jacobian_destination.data, time)
 
 
 cdef class ModelCSimInterface(CSimInterface):
@@ -476,15 +476,37 @@ cdef class ModelCSimInterface(CSimInterface):
     #Similar to prep_deterministic_simulation creates index arrays for
     # efficient accessing the reactions which influence species i and species j which change reaction r.
     #How it works:
-    #
+    #Recall:
+    #vector[vector[int]] S_indices[i] = list of propensities which effect species i
+    #vector[vector[int]] vector[S_values] #The stochiometric coeffient of species i in reaction S_indices[i] 
+    #Adding: 
+    #vector[vector[int]] rxn_species_indices[r] = list of species which effect propensity r
+
     cdef void prep_deterministic_jacobian(self):
-        cdef unsigned i, j, rxn, ind_r
+        cdef unsigned i, j, rxn, ind_r, s_ind
+        cdef Propensity prop
+        species2index = self.model.get_species2index()
 
-    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double* global_jacobian_inds, double time):
-        cdef unsigned rxn, i, j, ind, ind_j, iterate
-        cdef double dpdij #derivative of the propensity, not taking into account the stochiometric matrix
+        self.rxn_species_indices.clear()
+        
+        #Cycle through reactions
+        for rxn in range(self.num_reactions):
+            self.rxn_species_indices.push_back(vector[int]())
 
-        #Cycle through species and reactions to update the Jacobian using the stochiometric matrix
+            #Add species that effect the propensity
+            prop = <Propensity>self.c_propensities[0][rxn]
+            species, params = prop.get_species_and_parameters()
+            for s in species:
+                s_ind = <unsigned>species2index[s]
+                self.rxn_species_indices[rxn].push_back(s_ind)
+
+
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time):
+        cdef unsigned rxn, s1, s2, s1_ind, s2_ind, rxn_ind
+        cdef double d1, d2, d3 #derivative of the propensity, not taking into account the stochiometric matrix
+
+        #Cycle through species and reactions to update the Jacobian using the stochiometric matrix to 0
+        #(May not be necessary)
         t0 = pytime.clock()
         for i in range(self.num_species):
             iterate = 1
@@ -493,27 +515,20 @@ cdef class ModelCSimInterface(CSimInterface):
                 jacobian_destination[ind] = 0
 
         t1 = pytime.clock()
-        print("Reset Jacobian to 0 took:", t1-t0)
+        print("Reset Jacobian to 0 took (DO I NEED THIS?):", t1-t0)
         t0 = pytime.clock()
-        print("Jacobian NOT BEING COMPUTED YET")
-
-        """for i in range(self.num_species):
+        
+        for s1 in range(self.num_species):
             #Add each reactions contribution to each Jacobian entry [i, j]
-            for rxn in range(self.num_reactions): #I can use a data structure for reactions that effect species i. BIG SPEED UP
-                if self.update_array[i, rxn]>0:
-                    iterate = 1
-                    j = 0
-                    while iterate: 
-                        ind_j = global_jacobian_inds[rxn*self.num_species+j]
-                        if ind_j == -1:
-                            iterate = 0
-                        else:
-                            ind = i*self.num_species + ind_j
-                            dpdij = (<Propensity>(self.c_propensities[0][rxn])).get_species_derivative(ind_j, state, self.c_param_values, time)
-                            jacobian_destination[ind]+=self.update_array[i, rxn]*dpdij
-                            j = j+1
-        """
 
+            for rxn_ind in range(self.S_indices[s1].size()):
+                rxn = self.S_indices[s1][rxn_ind]
+
+                for s2_ind in range(self.rxn_species_indices[rxn].size()):
+                    s2 = self.rxn_species_indices[rxn][s2_ind]
+                    ind = s1*self.num_species + s2
+                    jacobian_destination[ind] +=  self.update_array[s1, rxn](<Propensity>(self.c_propensities[0][rxn])).get_species_derivative(s2, d1, d2, d3)#state, self.c_param_values, time)
+        
         """ global_jacobian_inds NOT USED BELOW 
                     for j in range(self.num_species):
                         ind = i*self.num_species + j
@@ -1309,7 +1324,6 @@ cdef class RegularSimulator:
 cdef void* global_simulator
 cdef np.ndarray global_derivative_buffer
 cdef np.ndarray global_jacobian_array
-cdef np.ndarray global_jacobian_inds #RxN matrix: a list of species involved in reaction r [r, :] = [x0, x1, ... -1, .. -1]
                 
 def rhs_global(np.ndarray[np.double_t,ndim=1] state, double t):
     global global_simulator
@@ -1329,7 +1343,7 @@ def jacobian_global(np.ndarray[np.double_t,ndim=1] state, double t):
     global global_simulator
     global global_jacobian_array
     t0 = pytime.clock()
-    (<CSimInterface>global_simulator).compute_jacobian(<double *> state.data, <double*> global_jacobian_array.data, <double*> global_jacobian_inds.data, t)
+    (<CSimInterface>global_simulator).compute_jacobian(<double *> state.data, <double*> global_jacobian_array.data, t)
     t1 = pytime.clock()
     print("Time inside global Jacobian", t1-t0)
     return global_jacobian_array
@@ -1385,7 +1399,6 @@ cdef class DeterministicSimulator(RegularSimulator):
         cdef unsigned steps_allowed = 500
         cdef np.ndarray[np.double_t, ndim=2] results
         global global_jacobian_array
-        global global_jacobian_inds
 
         if self.use_jacobian and sim.py_has_general_propensities():
             print("Warning: Jacobian's not defined for general propensities and integration may be slower.")

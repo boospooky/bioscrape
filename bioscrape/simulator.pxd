@@ -85,7 +85,7 @@ cdef class CSimInterface:
 
     #Optional method must be overwritten in subclasses. Only used if simulator tries to access a jacobian.
     cdef void prep_deterministic_jacobian(self)
-    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double* global_jacobian_inds, double time)
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time)
 
     # end of deterministic simulation stuff
 
@@ -130,7 +130,7 @@ cdef class ModelCSimInterface(CSimInterface):
     cdef np.ndarray np_param_values
 
     #Used for fast jacobian computation
-    cdef vector[vector[int]] J_rxn_indices #J_rxn_indices[i] = list of propensities which effect species i
+    cdef vector[vector[int]] species_rxn_indices #species_rxn_indices[i] = list of propensities which effect species i
     cdef vector[vector[int]] rxn_species_indices #rxn_species_indices[r] = list of species which effect propensity r
 
     cdef double compute_delay(self, double *state, unsigned rxn_index)
@@ -139,7 +139,7 @@ cdef class ModelCSimInterface(CSimInterface):
     cdef void compute_stochastic_propensities(self, double *state, double *propensity_destination, double time)
     cdef void compute_stochastic_volume_propensities(self, double *state, double *propensity_destination, double volume, double time)
     cdef void prep_deterministic_jacobian(self)
-    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double* global_jacobian_inds, double time)
+    cdef void compute_jacobian(self, double *state, double* jacobian_destination, double time)
 
 
     cdef np.ndarray get_initial_state(self)
